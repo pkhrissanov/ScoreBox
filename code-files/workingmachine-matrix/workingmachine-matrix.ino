@@ -1,16 +1,6 @@
-//===========================================================================//
-//                                                                           //
-//  Desc:    Arduino Code to implement a fencing scoring apparatus           //
-//  Dev:     Wnew                                                            //
-//  Date:    Nov  2012                                                       //
-//  Updated: Sept 2015                                                       //
-//                                                                           //
-//  Alisdair updates etc...                                                  //
-//  Modified (2026): WS2812B 8x8 matrices for Red/Green hit indicators       //
-//                   (2 matrices total, one data pin each)                   //
-//===========================================================================//
 
-#define DEBUG 1x
+
+#define DEBUG 1
 #define BUZZERTIME  1500  // ms
 #define LIGHTTIME   3500  // ms
 #define BAUDRATE   115200
@@ -26,9 +16,9 @@
 
 #define MATRIX_W 8
 #define MATRIX_H 8
-#define NUM_LEDS_MATRIX (MATRIX_W * MATRIX_H)  // 64
+#define NUM_LEDS_MATRIX (MATRIX_W * MATRIX_H)
 
-// Data pins (CONNECT MATRICES HERE)
+// Data pins
 const uint8_t GREEN_MATRIX_PIN = 9;   // Green fencer (A)
 const uint8_t RED_MATRIX_PIN   = 12;  // Red fencer (B)
 
@@ -36,10 +26,10 @@ CRGB greenMatrix[NUM_LEDS_MATRIX];
 CRGB redMatrix[NUM_LEDS_MATRIX];
 
 //====================
-// Pin Setup (rest)
+// Pin Setup
 //====================
-const uint8_t shortLEDA  =  8;    // Short Circuit A small LED (kept)
-const uint8_t shortLEDB  = 13;    // Short Circuit B small LED (kept)
+const uint8_t shortLEDA  =  8;
+const uint8_t shortLEDB  = 13;
 
 // Analog pins
 const uint8_t groundPinA = A0;
@@ -49,7 +39,7 @@ const uint8_t lamePinB   = A3;
 const uint8_t weaponPinB = A4;
 const uint8_t groundPinB = A5;
 
-// Mode + buzzer + mode LEDs (small LEDs)
+// Mode + buzzer + mode LEDs
 const uint8_t modePin    = 2;
 const uint8_t buzzerPin  = 3;
 const uint8_t modeLeds[] = {4, 5, 6}; // {foil, epee, sabre}
@@ -63,6 +53,9 @@ int lameA   = 0;
 int lameB   = 0;
 int groundA = 0;
 int groundB = 0;
+
+bool stripGroundA = false;
+bool stripGroundB = false;
 
 //=======================
 // depress and timeouts
@@ -98,34 +91,62 @@ boolean hitOffTargA = false;
 boolean hitOnTargB  = false;
 boolean hitOffTargB = false;
 
-// Short circuit flags (so we can display without spamming FastLED.show in the fast loop)
+// Short circuit flags
 bool shortAFlag = false;
 bool shortBFlag = false;
 
 //======================
 // Matrix helper funcs
 //======================
+uint16_t XY(uint8_t x, uint8_t y) {
+  if (y % 2 == 0) {
+    return y * MATRIX_W + x;
+  } else {
+    return y * MATRIX_W + (MATRIX_W - 1 - x);
+  }
+}
+
 void matricesClear() {
   fill_solid(greenMatrix, NUM_LEDS_MATRIX, CRGB::Black);
   fill_solid(redMatrix,   NUM_LEDS_MATRIX, CRGB::Black);
 }
 
-// Very simple display:
 // - On-target: solid team color
 // - Off-target: solid white
-// - Short: yellow (overrides)
+// - Short: full yellow
+// - Grounded: small yellow center dot
 void matricesRenderHits() {
   matricesClear();
 
-  // Green/A
+  // Green/A hit display
   if (hitOnTargA)  fill_solid(greenMatrix, NUM_LEDS_MATRIX, CRGB::Green);
   if (hitOffTargA) fill_solid(greenMatrix, NUM_LEDS_MATRIX, CRGB::White);
-  if (shortAFlag)  fill_solid(greenMatrix, NUM_LEDS_MATRIX, CRGB::Yellow);
 
-  // Red/B
+  // Red/B hit display
   if (hitOnTargB)  fill_solid(redMatrix, NUM_LEDS_MATRIX, CRGB::Red);
   if (hitOffTargB) fill_solid(redMatrix, NUM_LEDS_MATRIX, CRGB::White);
-  if (shortBFlag)  fill_solid(redMatrix, NUM_LEDS_MATRIX, CRGB::Yellow);
+
+  // Center 2x2 square
+  uint16_t c1 = XY(3, 3);
+  uint16_t c2 = XY(4, 3);
+  uint16_t c3 = XY(3, 4);
+  uint16_t c4 = XY(4, 4);
+
+  // Show small yellow square for short OR grounding,
+  // but only when that side is not already showing a hit
+  if (!hitOnTargA && !hitOffTargA && (shortAFlag || stripGroundA)) {
+    greenMatrix[c1] = CRGB::Yellow;
+    greenMatrix[c2] = CRGB::Yellow;
+    greenMatrix[c3] = CRGB::Yellow;
+    greenMatrix[c4] = CRGB::Yellow;
+  }
+
+  if (!hitOnTargB && !hitOffTargB && (shortBFlag || stripGroundB)) {
+    redMatrix[c1] = CRGB::Yellow;
+    redMatrix[c2] = CRGB::Yellow;
+    redMatrix[c3] = CRGB::Yellow;
+    redMatrix[c4] = CRGB::Yellow;
+  }
 
   FastLED.show();
 }
@@ -158,7 +179,7 @@ void setup() {
   Serial.begin(BAUDRATE);
 
   pinMode(modePin, INPUT_PULLUP);
-  attachInterrupt(modePin - 2, changeMode, FALLING);
+  attachInterrupt(digitalPinToInterrupt(modePin), changeMode, FALLING);
 
   pinMode(modeLeds[0], OUTPUT);
   pinMode(modeLeds[1], OUTPUT);
@@ -168,29 +189,24 @@ void setup() {
   pinMode(shortLEDB, OUTPUT);
   pinMode(buzzerPin, OUTPUT);
 
-  // Init matrices
   FastLED.addLeds<LED_TYPE, GREEN_MATRIX_PIN, COLOR_ORDER>(greenMatrix, NUM_LEDS_MATRIX);
   FastLED.addLeds<LED_TYPE, RED_MATRIX_PIN,   COLOR_ORDER>(redMatrix,   NUM_LEDS_MATRIX);
   FastLED.setBrightness(BRIGHTNESS);
+
   matricesClear();
   FastLED.show();
 
-  testLights();  // now tests matrices + mode LEDs
+  testLights();
 
   digitalWrite(modeLeds[currentMode], HIGH);
 
-  Serial.println("# WLFC 3 Weapon Scoring Box");
-  Serial.println("# =========================");
-  Serial.println();
-  Serial.println("version: 9 March 2021 (modified for WS2812B matrices)");
-  Serial.println();
+  Serial.println("#ScoreBox");
 
   Serial.print("# Mode : ");
   Serial.println(currentMode);
 
   resetValues();
 
-  // Choose mode before starting (5 seconds)
   unsigned long startloop = millis();
   uint8_t startMode = currentMode;
 
@@ -246,12 +262,19 @@ void loop() {
     weaponB = analogRead(weaponPinB);
     lameA   = analogRead(lamePinA);
     lameB   = analogRead(lamePinB);
+    groundA = analogRead(groundPinA);
+    groundB = analogRead(groundPinB);
 
-    signalHits();
+    // Adjust these thresholds if needed after testing
+    stripGroundA = (groundA > 400 && groundA < 600);
+    stripGroundB = (groundB > 400 && groundB < 600);
 
     if      (currentMode == FOIL_MODE)  foil();
     else if (currentMode == EPEE_MODE)  epee();
     else if (currentMode == SABRE_MODE) sabre();
+
+    matricesRenderHits();
+    signalHits();
   }
 }
 
@@ -310,10 +333,8 @@ void foil() {
     lockedOut = true;
   }
 
-  // weapon A
   if (!hitOnTargA && !hitOffTargA) {
-    // off target
-    if (900 < weaponA && lameB < 100) {
+    if (900 < weaponA && lameB < 100 && !stripGroundA) {
       if (!depressedA) {
         depressAtime = micros();
         depressedA   = true;
@@ -321,8 +342,7 @@ void foil() {
         hitOffTargA = true;
       }
     } else {
-      // on target
-      if (400 < weaponA && weaponA < 600 && 400 < lameB && lameB < 600) {
+      if (400 < weaponA && weaponA < 600 && 400 < lameB && lameB < 600 && !stripGroundA) {
         if (!depressedA) {
           depressAtime = micros();
           depressedA   = true;
@@ -336,10 +356,8 @@ void foil() {
     }
   }
 
-  // weapon B
   if (!hitOnTargB && !hitOffTargB) {
-    // off target
-    if (900 < weaponB && lameA < 100) {
+    if (900 < weaponB && lameA < 100 && !stripGroundB) {
       if (!depressedB) {
         depressBtime = micros();
         depressedB   = true;
@@ -347,8 +365,7 @@ void foil() {
         hitOffTargB = true;
       }
     } else {
-      // on target
-      if (400 < weaponB && weaponB < 600 && 400 < lameA && lameA < 600) {
+      if (400 < weaponB && weaponB < 600 && 400 < lameA && lameA < 600 && !stripGroundB) {
         if (!depressedB) {
           depressBtime = micros();
           depressedB   = true;
@@ -373,9 +390,10 @@ void epee() {
     lockedOut = true;
   }
 
-  // weapon A
   if (!hitOnTargA) {
-    if (400 < weaponA && weaponA < 600 && 400 < lameA && lameA < 600) {
+    if (400 < weaponA && weaponA < 600 &&
+        400 < lameA && lameA < 600 &&
+        !stripGroundA) {
       if (!depressedA) {
         depressAtime = micros();
         depressedA   = true;
@@ -384,7 +402,6 @@ void epee() {
       }
       shortAFlag = false;
     } else {
-      // short-circuit detection (flag + small LED)
       shortAFlag = (abs(weaponA - lameA) < 40 && (weaponA < 400 || weaponA > 600));
       digitalWrite(shortLEDA, shortAFlag ? HIGH : LOW);
 
@@ -395,9 +412,10 @@ void epee() {
     }
   }
 
-  // weapon B
   if (!hitOnTargB) {
-    if (400 < weaponB && weaponB < 600 && 400 < lameB && lameB < 600) {
+    if (400 < weaponB && weaponB < 600 &&
+        400 < lameB && lameB < 600 &&
+        !stripGroundB) {
       if (!depressedB) {
         depressBtime = micros();
         depressedB   = true;
@@ -427,9 +445,10 @@ void sabre() {
     lockedOut = true;
   }
 
-  // weapon A (on target only)
   if (!hitOnTargA && !hitOffTargA) {
-    if (315 < weaponA && weaponA < 600 && 300 < lameB && lameB < 600) {
+    if (315 < weaponA && weaponA < 600 &&
+        300 < lameB && lameB < 600 &&
+        !stripGroundA) {
       if (!depressedA) {
         depressAtime = micros();
         depressedA   = true;
@@ -442,9 +461,10 @@ void sabre() {
     }
   }
 
-  // weapon B (on target only)
   if (!hitOnTargB && !hitOffTargB) {
-    if (315 < weaponB && weaponB < 600 && 300 < lameA && lameA < 600) {
+    if (315 < weaponB && weaponB < 600 &&
+        300 < lameA && lameA < 600 &&
+        !stripGroundB) {
       if (!depressedB) {
         depressBtime = micros();
         depressedB   = true;
@@ -464,8 +484,6 @@ void sabre() {
 void signalHits() {
   if (lockedOut) {
     writeDisplay();
-
-    // Show the result on the matrices (single update)
     matricesRenderHits();
 
     digitalWrite(buzzerPin, HIGH);
@@ -483,11 +501,9 @@ void resetValues() {
 
   delay(LIGHTTIME - BUZZERTIME);
 
-  // Clear matrices
   matricesClear();
   FastLED.show();
 
-  // Turn off short LEDs
   digitalWrite(shortLEDA, LOW);
   digitalWrite(shortLEDB, LOW);
   shortAFlag = false;
@@ -511,10 +527,8 @@ void resetValues() {
 // Test lights
 //==============
 void testLights() {
-  // Test matrices
   matricesTest();
 
-  // Test mode LEDs
   digitalWrite(modeLeds[1], HIGH); delay(100); digitalWrite(modeLeds[1], LOW);
   digitalWrite(modeLeds[0], HIGH); delay(100); digitalWrite(modeLeds[0], LOW);
   digitalWrite(modeLeds[2], HIGH); delay(100); digitalWrite(modeLeds[2], LOW);
@@ -525,11 +539,11 @@ void testLights() {
 void buzz() {
   tone(buzzerPin, 500, 100);
 }
+
 void beep() {
   tone(buzzerPin, 1000, 500);
 }
 
-// Writes two-character hit codes to serial for wireless display
 void writeDisplay() {
   if (hitOnTargA)  Serial.println("GH");
   if (hitOffTargA) Serial.println("GM");
@@ -537,7 +551,7 @@ void writeDisplay() {
   if (hitOnTargB)  Serial.println("RH");
 }
 
-// Optional troubleshooting status dump
+// Optional troubleshooting
 void status() {
   Serial.println("======================================");
   Serial.print(" hitOnTargA :"); Serial.println(hitOnTargA);
@@ -548,6 +562,8 @@ void status() {
   Serial.print("      lameB :"); Serial.println(lameB);
   Serial.print("    weaponB :"); Serial.println(weaponB);
   Serial.print("      lameA :"); Serial.println(lameA);
+  Serial.print("    groundA :"); Serial.println(groundA);
+  Serial.print("    groundB :"); Serial.println(groundB);
   Serial.println("======================================");
   delay(1000);
 }
