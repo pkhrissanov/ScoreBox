@@ -1,5 +1,3 @@
-
-
 #define DEBUG 1
 #define BUZZERTIME  1500  // ms
 #define LIGHTTIME   3500  // ms
@@ -95,6 +93,24 @@ boolean hitOffTargB = false;
 bool shortAFlag = false;
 bool shortBFlag = false;
 
+//=========================
+// Phrase / output timing
+//=========================
+bool phraseActive = false;
+bool buzzerActive = false;
+
+unsigned long buzzerStartMs = 0;
+
+// LIGHTTIME now starts AFTER lockout
+bool resetCountdownStarted = false;
+unsigned long resetStartMs = 0;
+
+// Prevent duplicate serial sends
+bool sentOnA  = false;
+bool sentOffA = false;
+bool sentOnB  = false;
+bool sentOffB = false;
+
 //======================
 // Matrix helper funcs
 //======================
@@ -113,8 +129,8 @@ void matricesClear() {
 
 // - On-target: solid team color
 // - Off-target: solid white
-// - Short: full yellow
-// - Grounded: small yellow center dot
+// - Short: yellow center square
+// - Grounded: yellow center square
 void matricesRenderHits() {
   matricesClear();
 
@@ -132,8 +148,6 @@ void matricesRenderHits() {
   uint16_t c3 = XY(3, 4);
   uint16_t c4 = XY(4, 4);
 
-  // Show small yellow square for short OR grounding,
-  // but only when that side is not already showing a hit
   if (!hitOnTargA && !hitOffTargA && (shortAFlag || stripGroundA)) {
     greenMatrix[c1] = CRGB::Yellow;
     greenMatrix[c2] = CRGB::Yellow;
@@ -170,6 +184,115 @@ void matricesTest() {
   FastLED.show(); delay(250);
 
   matricesClear(); FastLED.show();
+}
+
+//====================================
+// Immediate output / phrase helpers
+//====================================
+void startPhraseIfNeeded() {
+  if (!phraseActive) {
+    phraseActive = true;
+
+    digitalWrite(buzzerPin, HIGH);
+    buzzerActive = true;
+    buzzerStartMs = millis();
+  }
+}
+
+void writeDisplayImmediate() {
+  if (hitOnTargA && !sentOnA) {
+    Serial.println("GH");
+    sentOnA = true;
+  }
+  if (hitOffTargA && !sentOffA) {
+    Serial.println("GM");
+    sentOffA = true;
+  }
+  if (hitOffTargB && !sentOffB) {
+    Serial.println("RM");
+    sentOffB = true;
+  }
+  if (hitOnTargB && !sentOnB) {
+    Serial.println("RH");
+    sentOnB = true;
+  }
+}
+
+void registerHitOnA() {
+  if (!hitOnTargA) {
+    hitOnTargA = true;
+    startPhraseIfNeeded();
+    matricesRenderHits();
+    writeDisplayImmediate();
+  }
+}
+
+void registerHitOffA() {
+  if (!hitOffTargA) {
+    hitOffTargA = true;
+    startPhraseIfNeeded();
+    matricesRenderHits();
+    writeDisplayImmediate();
+  }
+}
+
+void registerHitOnB() {
+  if (!hitOnTargB) {
+    hitOnTargB = true;
+    startPhraseIfNeeded();
+    matricesRenderHits();
+    writeDisplayImmediate();
+  }
+}
+
+void registerHitOffB() {
+  if (!hitOffTargB) {
+    hitOffTargB = true;
+    startPhraseIfNeeded();
+    matricesRenderHits();
+    writeDisplayImmediate();
+  }
+}
+
+//======================
+// Reset all variables
+//======================
+void resetValues() {
+  digitalWrite(buzzerPin, LOW);
+  buzzerActive = false;
+
+  matricesClear();
+  FastLED.show();
+
+  digitalWrite(shortLEDA, LOW);
+  digitalWrite(shortLEDB, LOW);
+  shortAFlag = false;
+  shortBFlag = false;
+
+  lockedOut = false;
+  phraseActive = false;
+
+  depressAtime = 0;
+  depressedA   = false;
+  depressBtime = 0;
+  depressedB   = false;
+
+  hitOnTargA  = false;
+  hitOffTargA = false;
+  hitOnTargB  = false;
+  hitOffTargB = false;
+
+  stripGroundA = false;
+  stripGroundB = false;
+
+  buzzerStartMs = 0;
+  resetCountdownStarted = false;
+  resetStartMs = 0;
+
+  sentOnA  = false;
+  sentOffA = false;
+  sentOnB  = false;
+  sentOffB = false;
 }
 
 //================
@@ -265,7 +388,6 @@ void loop() {
     groundA = analogRead(groundPinA);
     groundB = analogRead(groundPinB);
 
-    // Adjust these thresholds if needed after testing
     stripGroundA = (groundA > 400 && groundA < 600);
     stripGroundB = (groundB > 400 && groundB < 600);
 
@@ -328,10 +450,13 @@ void checkIfModeChanged() {
 //===================
 void foil() {
   long now = micros();
+
   if (((hitOnTargA || hitOffTargA) && (depressAtime + lockout[0] < now)) ||
       ((hitOnTargB || hitOffTargB) && (depressBtime + lockout[0] < now))) {
     lockedOut = true;
   }
+
+  if (lockedOut) return;
 
   if (!hitOnTargA && !hitOffTargA) {
     if (900 < weaponA && lameB < 100 && !stripGroundA) {
@@ -339,15 +464,17 @@ void foil() {
         depressAtime = micros();
         depressedA   = true;
       } else if (depressAtime + depress[0] <= micros()) {
-        hitOffTargA = true;
+        registerHitOffA();
       }
     } else {
-      if (400 < weaponA && weaponA < 600 && 400 < lameB && lameB < 600 && !stripGroundA) {
+      if (400 < weaponA && weaponA < 600 &&
+          400 < lameB && lameB < 600 &&
+          !stripGroundA) {
         if (!depressedA) {
           depressAtime = micros();
           depressedA   = true;
         } else if (depressAtime + depress[0] <= micros()) {
-          hitOnTargA = true;
+          registerHitOnA();
         }
       } else {
         depressAtime = 0;
@@ -362,15 +489,17 @@ void foil() {
         depressBtime = micros();
         depressedB   = true;
       } else if (depressBtime + depress[0] <= micros()) {
-        hitOffTargB = true;
+        registerHitOffB();
       }
     } else {
-      if (400 < weaponB && weaponB < 600 && 400 < lameA && lameA < 600 && !stripGroundB) {
+      if (400 < weaponB && weaponB < 600 &&
+          400 < lameA && lameA < 600 &&
+          !stripGroundB) {
         if (!depressedB) {
           depressBtime = micros();
           depressedB   = true;
         } else if (depressBtime + depress[0] <= micros()) {
-          hitOnTargB = true;
+          registerHitOnB();
         }
       } else {
         depressBtime = 0;
@@ -385,10 +514,13 @@ void foil() {
 //===================
 void epee() {
   long now = micros();
+
   if ((hitOnTargA && (depressAtime + lockout[1] < now)) ||
       (hitOnTargB && (depressBtime + lockout[1] < now))) {
     lockedOut = true;
   }
+
+  if (lockedOut) return;
 
   if (!hitOnTargA) {
     if (400 < weaponA && weaponA < 600 &&
@@ -398,9 +530,10 @@ void epee() {
         depressAtime = micros();
         depressedA   = true;
       } else if (depressAtime + depress[1] <= micros()) {
-        hitOnTargA = true;
+        registerHitOnA();
       }
       shortAFlag = false;
+      digitalWrite(shortLEDA, LOW);
     } else {
       shortAFlag = (abs(weaponA - lameA) < 40 && (weaponA < 400 || weaponA > 600));
       digitalWrite(shortLEDA, shortAFlag ? HIGH : LOW);
@@ -420,9 +553,10 @@ void epee() {
         depressBtime = micros();
         depressedB   = true;
       } else if (depressBtime + depress[1] <= micros()) {
-        hitOnTargB = true;
+        registerHitOnB();
       }
       shortBFlag = false;
+      digitalWrite(shortLEDB, LOW);
     } else {
       shortBFlag = (abs(weaponB - lameB) < 40 && (weaponB < 400 || weaponB > 600));
       digitalWrite(shortLEDB, shortBFlag ? HIGH : LOW);
@@ -440,10 +574,13 @@ void epee() {
 //===================
 void sabre() {
   long now = micros();
+
   if (((hitOnTargA || hitOffTargA) && (depressAtime + lockout[2] < now)) ||
       ((hitOnTargB || hitOffTargB) && (depressBtime + lockout[2] < now))) {
     lockedOut = true;
   }
+
+  if (lockedOut) return;
 
   if (!hitOnTargA && !hitOffTargA) {
     if (315 < weaponA && weaponA < 600 &&
@@ -453,7 +590,7 @@ void sabre() {
         depressAtime = micros();
         depressedA   = true;
       } else if (depressAtime + depress[2] <= micros()) {
-        hitOnTargA = true;
+        registerHitOnA();
       }
     } else {
       depressAtime = 0;
@@ -469,7 +606,7 @@ void sabre() {
         depressBtime = micros();
         depressedB   = true;
       } else if (depressBtime + depress[2] <= micros()) {
-        hitOnTargB = true;
+        registerHitOnB();
       }
     } else {
       depressBtime = 0;
@@ -482,45 +619,22 @@ void sabre() {
 // Signal Hits
 //==============
 void signalHits() {
-  if (lockedOut) {
-    writeDisplay();
-    matricesRenderHits();
+  // Turn buzzer off after BUZZERTIME from first confirmed hit
+  if (buzzerActive && (millis() - buzzerStartMs >= BUZZERTIME)) {
+    digitalWrite(buzzerPin, LOW);
+    buzzerActive = false;
+  }
 
-    digitalWrite(buzzerPin, HIGH);
+  // Start LIGHTTIME countdown only after lockout happens
+  if (phraseActive && lockedOut && !resetCountdownStarted) {
+    resetCountdownStarted = true;
+    resetStartMs = millis();
+  }
 
+  // After lockout, keep lights up for LIGHTTIME, then reset
+  if (resetCountdownStarted && (millis() - resetStartMs >= LIGHTTIME)) {
     resetValues();
   }
-}
-
-//======================
-// Reset all variables
-//======================
-void resetValues() {
-  delay(BUZZERTIME);
-  digitalWrite(buzzerPin, LOW);
-
-  delay(LIGHTTIME - BUZZERTIME);
-
-  matricesClear();
-  FastLED.show();
-
-  digitalWrite(shortLEDA, LOW);
-  digitalWrite(shortLEDB, LOW);
-  shortAFlag = false;
-  shortBFlag = false;
-
-  lockedOut    = false;
-  depressAtime = 0;
-  depressedA   = false;
-  depressBtime = 0;
-  depressedB   = false;
-
-  hitOnTargA  = false;
-  hitOffTargA = false;
-  hitOnTargB  = false;
-  hitOffTargB = false;
-
-  delay(100);
 }
 
 //==============
@@ -544,6 +658,7 @@ void beep() {
   tone(buzzerPin, 1000, 500);
 }
 
+// Kept for compatibility / optional use
 void writeDisplay() {
   if (hitOnTargA)  Serial.println("GH");
   if (hitOffTargA) Serial.println("GM");
