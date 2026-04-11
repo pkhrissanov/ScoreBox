@@ -1,15 +1,14 @@
 #include <Arduino.h>
+#include <FastLED.h>
 
 #define DEBUG 1
 #define BUZZERTIME  1500  // ms
-#define LIGHTTIME   3500  // ms
+#define LIGHTTIME   3500  // ms (starts AFTER lockout ends)
 #define BAUDRATE   115200
 
 //======================
 // WS2812B MATRIX SETUP
 //======================
-#include <FastLED.h>
-
 #define LED_TYPE     WS2812B
 #define COLOR_ORDER  GRB
 #define BRIGHTNESS   70
@@ -57,19 +56,12 @@ int groundB = 0;
 bool stripGroundA = false;
 bool stripGroundB = false;
 
-//=======================
-// depress and timeouts
-//=======================
-long depressAtime = 0;
-long depressBtime = 0;
-bool lockedOut    = false;
-
 //==========================
 // Lockout & Depress Times
 //==========================
 //                         foil   epee   sabre
-const long lockout[] = {300000, 45000, 170000};
-const long depress[] = { 14000,  2000,   1000};
+const unsigned long lockout[] = {300000UL, 45000UL, 170000UL}; // microseconds
+const unsigned long depress[] = { 14000UL,  2000UL,   1000UL}; // microseconds
 
 //=================
 // mode constants
@@ -79,7 +71,7 @@ const uint8_t EPEE_MODE  = 1;
 const uint8_t SABRE_MODE = 2;
 
 uint8_t currentMode = EPEE_MODE;
-bool modeJustChangedFlag = false;
+volatile bool modeJustChangedFlag = false;
 
 //=========
 // states
@@ -94,6 +86,20 @@ bool hitOffTargB = false;
 // Short circuit flags
 bool shortAFlag = false;
 bool shortBFlag = false;
+
+// Candidate hit timing
+unsigned long depressAtime = 0;
+unsigned long depressBtime = 0;
+
+//=============================
+// Scoring cycle state
+//=============================
+bool scoringActive      = false;
+bool displayHoldActive  = false;
+unsigned long lockoutStartUs = 0;
+unsigned long displayStartMs = 0;
+unsigned long buzzerStartMs  = 0;
+bool buzzerActive = false;
 
 //======================
 // Matrix helper funcs
@@ -111,29 +117,20 @@ void matricesClear() {
   fill_solid(redMatrix,   NUM_LEDS_MATRIX, CRGB::Black);
 }
 
-// - On-target: solid team color
-// - Off-target: solid white
-// - Short: full yellow
-// - Grounded: small yellow center dot
 void matricesRenderHits() {
   matricesClear();
 
-  // Green/A hit display
   if (hitOnTargA)  fill_solid(greenMatrix, NUM_LEDS_MATRIX, CRGB::Green);
   if (hitOffTargA) fill_solid(greenMatrix, NUM_LEDS_MATRIX, CRGB::White);
 
-  // Red/B hit display
   if (hitOnTargB)  fill_solid(redMatrix, NUM_LEDS_MATRIX, CRGB::Red);
   if (hitOffTargB) fill_solid(redMatrix, NUM_LEDS_MATRIX, CRGB::White);
 
-  // Center 2x2 square
   uint16_t c1 = XY(3, 3);
   uint16_t c2 = XY(4, 3);
   uint16_t c3 = XY(3, 4);
   uint16_t c4 = XY(4, 4);
 
-  // Show small yellow square for short OR grounding,
-  // but only when that side is not already showing a hit
   if (!hitOnTargA && !hitOffTargA && (shortAFlag || stripGroundA)) {
     greenMatrix[c1] = CRGB::Yellow;
     greenMatrix[c2] = CRGB::Yellow;
@@ -151,7 +148,6 @@ void matricesRenderHits() {
   FastLED.show();
 }
 
-// Quick flash test patterns
 void matricesTest() {
   matricesClear();
   FastLED.show();
@@ -188,12 +184,69 @@ void changeMode() {
   modeJustChangedFlag = true;
 }
 
-void buzz() {
-  tone(buzzerPin, 500, 100);
+void buzzShort() {
+  digitalWrite(buzzerPin, HIGH);
+  delay(100);
+  digitalWrite(buzzerPin, LOW);
 }
 
 void beep() {
-  tone(buzzerPin, 1000, 500);
+  digitalWrite(buzzerPin, HIGH);
+  delay(500);
+  digitalWrite(buzzerPin, LOW);
+}
+
+//============================
+// Helper threshold checks
+//============================
+bool isMidFoilEpee(int v) {
+  return (v > 400 && v < 600);
+}
+
+bool isMidSabreWeapon(int v) {
+  return (v > 315 && v < 600);
+}
+
+bool isMidSabreLame(int v) {
+  return (v > 300 && v < 600);
+}
+
+// foil/sabre self-short: blade touching own lame
+bool foilShortA() {
+  return isMidFoilEpee(weaponA) && isMidFoilEpee(lameA);
+}
+
+bool foilShortB() {
+  return isMidFoilEpee(weaponB) && isMidFoilEpee(lameB);
+}
+
+bool sabreShortA() {
+  return isMidSabreWeapon(weaponA) && isMidSabreLame(lameA);
+}
+
+bool sabreShortB() {
+  return isMidSabreWeapon(weaponB) && isMidSabreLame(lameB);
+}
+
+void updateShortIndicators() {
+  switch (currentMode) {
+    case FOIL_MODE:
+      shortAFlag = foilShortA();
+      shortBFlag = foilShortB();
+      break;
+
+    case EPEE_MODE:
+      // epee short flags are handled in epee()
+      break;
+
+    case SABRE_MODE:
+      shortAFlag = sabreShortA();
+      shortBFlag = sabreShortB();
+      break;
+  }
+
+  digitalWrite(shortLEDA, shortAFlag ? HIGH : LOW);
+  digitalWrite(shortLEDB, shortBFlag ? HIGH : LOW);
 }
 
 //============================
@@ -205,59 +258,124 @@ void setModeLeds() {
   digitalWrite(modeLeds[2], LOW);
 
   digitalWrite(modeLeds[currentMode], HIGH);
-  buzz();
+  buzzShort();
   delay(500);
 }
 
-void writeDisplay() {
-  if (hitOnTargA)  Serial.println("GH");
-  if (hitOffTargA) Serial.println("GM");
-  if (hitOffTargB) Serial.println("RM");
-  if (hitOnTargB)  Serial.println("RH");
+void sendHitMessageA(bool onTarget) {
+  Serial.println(onTarget ? "GH" : "GM");
 }
 
-//======================
-// Reset all variables
-//======================
-void resetValues() {
-  delay(BUZZERTIME);
+void sendHitMessageB(bool onTarget) {
+  Serial.println(onTarget ? "RH" : "RM");
+}
+
+unsigned long currentLockoutTime() {
+  return lockout[currentMode];
+}
+
+bool lockoutWindowOpen() {
+  if (!scoringActive) return false;
+  return (micros() - lockoutStartUs) < currentLockoutTime();
+}
+
+void startBuzzer() {
+  digitalWrite(buzzerPin, HIGH);
+  buzzerStartMs = millis();
+  buzzerActive = true;
+}
+
+void stopBuzzerIfNeeded() {
+  if (buzzerActive && (millis() - buzzerStartMs >= BUZZERTIME)) {
+    digitalWrite(buzzerPin, LOW);
+    buzzerActive = false;
+  }
+}
+
+void resetHitStateOnly() {
+  hitOnTargA  = false;
+  hitOffTargA = false;
+  hitOnTargB  = false;
+  hitOffTargB = false;
+
+  depressedA = false;
+  depressedB = false;
+  depressAtime = 0;
+  depressBtime = 0;
+
+  scoringActive = false;
+  displayHoldActive = false;
+  lockoutStartUs = 0;
+  displayStartMs = 0;
+
   digitalWrite(buzzerPin, LOW);
+  buzzerActive = false;
+}
 
-  delay(LIGHTTIME - BUZZERTIME);
-
-  matricesClear();
-  FastLED.show();
+void fullReset() {
+  resetHitStateOnly();
 
   digitalWrite(shortLEDA, LOW);
   digitalWrite(shortLEDB, LOW);
   shortAFlag = false;
   shortBFlag = false;
 
-  lockedOut    = false;
-  depressAtime = 0;
-  depressedA   = false;
-  depressBtime = 0;
-  depressedB   = false;
-
-  hitOnTargA  = false;
-  hitOffTargA = false;
-  hitOnTargB  = false;
-  hitOffTargB = false;
-
-  delay(100);
+  matricesClear();
+  FastLED.show();
 }
 
-//==============
-// Signal Hits
-//==============
-void signalHits() {
-  if (lockedOut) {
-    writeDisplay();
-    matricesRenderHits();
+void registerHitA(bool onTarget) {
+  if (onTarget) {
+    if (hitOnTargA) return;
+    hitOnTargA = true;
+  } else {
+    if (hitOffTargA) return;
+    hitOffTargA = true;
+  }
 
-    digitalWrite(buzzerPin, HIGH);
+  if (!scoringActive) {
+    scoringActive = true;
+    displayHoldActive = false;
+    lockoutStartUs = micros();
+    startBuzzer();
+  }
 
-    resetValues();
+  sendHitMessageA(onTarget);
+  matricesRenderHits();
+}
+
+void registerHitB(bool onTarget) {
+  if (onTarget) {
+    if (hitOnTargB) return;
+    hitOnTargB = true;
+  } else {
+    if (hitOffTargB) return;
+    hitOffTargB = true;
+  }
+
+  if (!scoringActive) {
+    scoringActive = true;
+    displayHoldActive = false;
+    lockoutStartUs = micros();
+    startBuzzer();
+  }
+
+  sendHitMessageB(onTarget);
+  matricesRenderHits();
+}
+
+void updateScoringCycle() {
+  stopBuzzerIfNeeded();
+
+  if (!scoringActive) return;
+
+  if (!displayHoldActive && !lockoutWindowOpen()) {
+    displayHoldActive = true;
+    displayStartMs = millis();
+  }
+
+  if (displayHoldActive && (millis() - displayStartMs >= LIGHTTIME)) {
+    fullReset();
   }
 }
 
@@ -266,7 +384,7 @@ void signalHits() {
 //========================
 void checkIfModeChanged() {
   if (modeJustChangedFlag) {
-    if (currentMode == 2) currentMode = 0;
+    if (currentMode == SABRE_MODE) currentMode = FOIL_MODE;
     else currentMode++;
 
     setModeLeds();
@@ -274,15 +392,17 @@ void checkIfModeChanged() {
 #if DEBUG
     Serial.print("# Mode changed to: ");
     switch (currentMode) {
-      case 0: Serial.println("Foil");  break;
-      case 1: Serial.println("Epee");  break;
-      case 2: Serial.println("Sabre"); break;
+      case FOIL_MODE:  Serial.println("Foil");  break;
+      case EPEE_MODE:  Serial.println("Epee");  break;
+      case SABRE_MODE: Serial.println("Sabre"); break;
     }
 #endif
 
     modeJustChangedFlag = false;
+    fullReset();
+
     unsigned long currentMillis = millis();
-    while ((millis() - currentMillis) < 500) { }
+    while ((millis() - currentMillis) < 300) { }
   }
 }
 
@@ -290,55 +410,57 @@ void checkIfModeChanged() {
 // Main foil method
 //===================
 void foil() {
-  long now = micros();
-  if (((hitOnTargA || hitOffTargA) && (depressAtime + lockout[0] < now)) ||
-      ((hitOnTargB || hitOffTargB) && (depressBtime + lockout[0] < now))) {
-    lockedOut = true;
-  }
+  // foil short = own weapon touching own lame
+  shortAFlag = foilShortA();
+  shortBFlag = foilShortB();
+  digitalWrite(shortLEDA, shortAFlag ? HIGH : LOW);
+  digitalWrite(shortLEDB, shortBFlag ? HIGH : LOW);
 
   if (!hitOnTargA && !hitOffTargA) {
-    if (900 < weaponA && lameB < 100 && !stripGroundA) {
+    if (weaponA > 900 && lameB < 100 && !stripGroundA) {
       if (!depressedA) {
         depressAtime = micros();
-        depressedA   = true;
-      } else if (depressAtime + depress[0] <= micros()) {
-        hitOffTargA = true;
+        depressedA = true;
+      } else if (micros() - depressAtime >= depress[FOIL_MODE]) {
+        registerHitA(false);
+      }
+    }
+    else if (weaponA > 400 && weaponA < 600 &&
+             lameB   > 400 && lameB   < 600 &&
+             !stripGroundA) {
+      if (!depressedA) {
+        depressAtime = micros();
+        depressedA = true;
+      } else if (micros() - depressAtime >= depress[FOIL_MODE]) {
+        registerHitA(true);
       }
     } else {
-      if (400 < weaponA && weaponA < 600 && 400 < lameB && lameB < 600 && !stripGroundA) {
-        if (!depressedA) {
-          depressAtime = micros();
-          depressedA   = true;
-        } else if (depressAtime + depress[0] <= micros()) {
-          hitOnTargA = true;
-        }
-      } else {
-        depressAtime = 0;
-        depressedA   = false;
-      }
+      depressAtime = 0;
+      depressedA = false;
     }
   }
 
   if (!hitOnTargB && !hitOffTargB) {
-    if (900 < weaponB && lameA < 100 && !stripGroundB) {
+    if (weaponB > 900 && lameA < 100 && !stripGroundB) {
       if (!depressedB) {
         depressBtime = micros();
-        depressedB   = true;
-      } else if (depressBtime + depress[0] <= micros()) {
-        hitOffTargB = true;
+        depressedB = true;
+      } else if (micros() - depressBtime >= depress[FOIL_MODE]) {
+        registerHitB(false);
+      }
+    }
+    else if (weaponB > 400 && weaponB < 600 &&
+             lameA   > 400 && lameA   < 600 &&
+             !stripGroundB) {
+      if (!depressedB) {
+        depressBtime = micros();
+        depressedB = true;
+      } else if (micros() - depressBtime >= depress[FOIL_MODE]) {
+        registerHitB(true);
       }
     } else {
-      if (400 < weaponB && weaponB < 600 && 400 < lameA && lameA < 600 && !stripGroundB) {
-        if (!depressedB) {
-          depressBtime = micros();
-          depressedB   = true;
-        } else if (depressBtime + depress[0] <= micros()) {
-          hitOnTargB = true;
-        }
-      } else {
-        depressBtime = 0;
-        depressedB   = false;
-      }
+      depressBtime = 0;
+      depressedB = false;
     }
   }
 }
@@ -347,54 +469,48 @@ void foil() {
 // Main epee method
 //===================
 void epee() {
-  long now = micros();
-  if ((hitOnTargA && (depressAtime + lockout[1] < now)) ||
-      (hitOnTargB && (depressBtime + lockout[1] < now))) {
-    lockedOut = true;
-  }
-
   if (!hitOnTargA) {
-    if (400 < weaponA && weaponA < 600 &&
-        400 < lameA && lameA < 600 &&
+    if (weaponA > 400 && weaponA < 600 &&
+        lameA   > 400 && lameA   < 600 &&
         !stripGroundA) {
       if (!depressedA) {
         depressAtime = micros();
-        depressedA   = true;
-      } else if (depressAtime + depress[1] <= micros()) {
-        hitOnTargA = true;
+        depressedA = true;
+      } else if (micros() - depressAtime >= depress[EPEE_MODE]) {
+        registerHitA(true);
       }
       shortAFlag = false;
     } else {
       shortAFlag = (abs(weaponA - lameA) < 40 && (weaponA < 400 || weaponA > 600));
       digitalWrite(shortLEDA, shortAFlag ? HIGH : LOW);
 
-      if (depressedA) {
-        depressAtime = 0;
-        depressedA   = false;
-      }
+      depressAtime = 0;
+      depressedA = false;
     }
+  } else {
+    digitalWrite(shortLEDA, LOW);
   }
 
   if (!hitOnTargB) {
-    if (400 < weaponB && weaponB < 600 &&
-        400 < lameB && lameB < 600 &&
+    if (weaponB > 400 && weaponB < 600 &&
+        lameB   > 400 && lameB   < 600 &&
         !stripGroundB) {
       if (!depressedB) {
         depressBtime = micros();
-        depressedB   = true;
-      } else if (depressBtime + depress[1] <= micros()) {
-        hitOnTargB = true;
+        depressedB = true;
+      } else if (micros() - depressBtime >= depress[EPEE_MODE]) {
+        registerHitB(true);
       }
       shortBFlag = false;
     } else {
       shortBFlag = (abs(weaponB - lameB) < 40 && (weaponB < 400 || weaponB > 600));
       digitalWrite(shortLEDB, shortBFlag ? HIGH : LOW);
 
-      if (depressedB) {
-        depressBtime = 0;
-        depressedB   = false;
-      }
+      depressBtime = 0;
+      depressedB = false;
     }
+  } else {
+    digitalWrite(shortLEDB, LOW);
   }
 }
 
@@ -402,41 +518,41 @@ void epee() {
 // Main sabre method
 //===================
 void sabre() {
-  long now = micros();
-  if (((hitOnTargA || hitOffTargA) && (depressAtime + lockout[2] < now)) ||
-      ((hitOnTargB || hitOffTargB) && (depressBtime + lockout[2] < now))) {
-    lockedOut = true;
-  }
+  // sabre short = own weapon touching own lame
+  shortAFlag = sabreShortA();
+  shortBFlag = sabreShortB();
+  digitalWrite(shortLEDA, shortAFlag ? HIGH : LOW);
+  digitalWrite(shortLEDB, shortBFlag ? HIGH : LOW);
 
   if (!hitOnTargA && !hitOffTargA) {
-    if (315 < weaponA && weaponA < 600 &&
-        300 < lameB && lameB < 600 &&
+    if (weaponA > 315 && weaponA < 600 &&
+        lameB   > 300 && lameB   < 600 &&
         !stripGroundA) {
       if (!depressedA) {
         depressAtime = micros();
-        depressedA   = true;
-      } else if (depressAtime + depress[2] <= micros()) {
-        hitOnTargA = true;
+        depressedA = true;
+      } else if (micros() - depressAtime >= depress[SABRE_MODE]) {
+        registerHitA(true);
       }
     } else {
       depressAtime = 0;
-      depressedA   = false;
+      depressedA = false;
     }
   }
 
   if (!hitOnTargB && !hitOffTargB) {
-    if (315 < weaponB && weaponB < 600 &&
-        300 < lameA && lameA < 600 &&
+    if (weaponB > 315 && weaponB < 600 &&
+        lameA   > 300 && lameA   < 600 &&
         !stripGroundB) {
       if (!depressedB) {
         depressBtime = micros();
-        depressedB   = true;
-      } else if (depressBtime + depress[2] <= micros()) {
-        hitOnTargB = true;
+        depressedB = true;
+      } else if (micros() - depressBtime >= depress[SABRE_MODE]) {
+        registerHitB(true);
       }
     } else {
       depressBtime = 0;
-      depressedB   = false;
+      depressedB = false;
     }
   }
 }
@@ -459,7 +575,7 @@ void testLights() {
   delay(100);
   digitalWrite(modeLeds[2], LOW);
 
-  buzz();
+  buzzShort();
 }
 
 // Optional troubleshooting
@@ -469,12 +585,16 @@ void status() {
   Serial.print("hitOffTargA :"); Serial.println(hitOffTargA);
   Serial.print(" hitOnTargB :"); Serial.println(hitOnTargB);
   Serial.print("hitOffTargB :"); Serial.println(hitOffTargB);
-  Serial.print("    weaponA :"); Serial.println(weaponA);
-  Serial.print("      lameB :"); Serial.println(lameB);
-  Serial.print("    weaponB :"); Serial.println(weaponB);
-  Serial.print("      lameA :"); Serial.println(lameA);
-  Serial.print("    groundA :"); Serial.println(groundA);
-  Serial.print("    groundB :"); Serial.println(groundB);
+  Serial.print(" shortAFlag :"); Serial.println(shortAFlag);
+  Serial.print(" shortBFlag :"); Serial.println(shortBFlag);
+  Serial.print(" scoringAct :"); Serial.println(scoringActive);
+  Serial.print(" lockoutOpen :"); Serial.println(lockoutWindowOpen());
+  Serial.print("    weaponA  :"); Serial.println(weaponA);
+  Serial.print("    weaponB  :"); Serial.println(weaponB);
+  Serial.print("    lameA    :"); Serial.println(lameA);
+  Serial.print("    lameB    :"); Serial.println(lameB);
+  Serial.print("    groundA  :"); Serial.println(groundA);
+  Serial.print("    groundB  :"); Serial.println(groundB);
   Serial.println("======================================");
   delay(1000);
 }
@@ -495,6 +615,7 @@ void setup() {
   pinMode(shortLEDA, OUTPUT);
   pinMode(shortLEDB, OUTPUT);
   pinMode(buzzerPin, OUTPUT);
+  digitalWrite(buzzerPin, LOW);
 
   FastLED.addLeds<LED_TYPE, GREEN_MATRIX_PIN, COLOR_ORDER>(greenMatrix, NUM_LEDS_MATRIX);
   FastLED.addLeds<LED_TYPE, RED_MATRIX_PIN,   COLOR_ORDER>(redMatrix,   NUM_LEDS_MATRIX);
@@ -508,11 +629,10 @@ void setup() {
   digitalWrite(modeLeds[currentMode], HIGH);
 
   Serial.println("#ScoreBox");
-
   Serial.print("# Mode : ");
   Serial.println(currentMode);
 
-  resetValues();
+  fullReset();
 
   unsigned long startloop = millis();
   uint8_t startMode = currentMode;
@@ -524,7 +644,7 @@ void setup() {
 
   while (millis() - startloop <= 5000) {
     if (modeJustChangedFlag) {
-      if (currentMode == 2) currentMode = 0;
+      if (currentMode == SABRE_MODE) currentMode = FOIL_MODE;
       else currentMode++;
 
       setModeLeds();
@@ -532,14 +652,15 @@ void setup() {
 
       Serial.print("# Mode changed to: ");
       switch (currentMode) {
-        case 0: Serial.println("Foil");  break;
-        case 1: Serial.println("Epee");  break;
-        case 2: Serial.println("Sabre"); break;
+        case FOIL_MODE:  Serial.println("Foil");  break;
+        case EPEE_MODE:  Serial.println("Epee");  break;
+        case SABRE_MODE: Serial.println("Sabre"); break;
       }
 
       modeJustChangedFlag = false;
+
       unsigned long currentMillis = millis();
-      while ((millis() - currentMillis) < 1000) { }
+      while ((millis() - currentMillis) < 500) { }
     }
 
     if (currentMode != startMode) {
@@ -547,7 +668,7 @@ void setup() {
       digitalWrite(modeLeds[1], LOW);
       digitalWrite(modeLeds[2], LOW);
       digitalWrite(modeLeds[currentMode], HIGH);
-      buzz();
+      buzzShort();
     }
     startMode = currentMode;
   }
@@ -572,19 +693,25 @@ void loop() {
     groundA = analogRead(groundPinA);
     groundB = analogRead(groundPinB);
 
-    // Adjust these thresholds if needed after testing
     stripGroundA = (groundA > 400 && groundA < 600);
     stripGroundB = (groundB > 400 && groundB < 600);
 
-    if (currentMode == FOIL_MODE) {
-      foil();
-    } else if (currentMode == EPEE_MODE) {
-      epee();
-    } else if (currentMode == SABRE_MODE) {
-      sabre();
+    if (!scoringActive || lockoutWindowOpen()) {
+      if (currentMode == FOIL_MODE) {
+        foil();
+      } else if (currentMode == EPEE_MODE) {
+        epee();
+      } else if (currentMode == SABRE_MODE) {
+        sabre();
+      }
+    } else {
+      // keep foil/sabre short indicators alive even while not re-running hit logic
+      if (currentMode == FOIL_MODE || currentMode == SABRE_MODE) {
+        updateShortIndicators();
+      }
     }
 
     matricesRenderHits();
-    signalHits();
+    updateScoringCycle();
   }
 }
