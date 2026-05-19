@@ -1,0 +1,333 @@
+ScoreBox
+========================================
+1. OBJECTIVE
+========================================
+Build a modern fencing scoring system that:
+- Matches traditional machines (Favero, SG)
+- Provides instant and accurate hit detection
+- Uses modular hardware (Lite vs Pro)
+- Works fully offline
+- Prioritizes reliability over features
+
+========================================
+2. CORE DESIGN PRINCIPLES
+========================================
+1. Timing integrity is critical
+2. Display must not block scoring
+3. System must work without remote or UI
+4. Visual clarity over complexity
+5. Modular design
+
+========================================
+3. SYSTEM ARCHITECTURE
+========================================
+
+3.1 Real-Time Engine
+- Hit detection
+- Lockout timing
+- Weapon logic
+(Must never be delayed)
+
+3.2 Control Layer
+- Mode switching
+- Remote input
+- Time adjustment (Pro)
+
+3.3 Output Layer
+- LED matrices
+- Buzzer
+- Indicators
+
+========================================
+4. LITE VERSION (WS2812B)
+========================================
+
+Purpose:
+- Pure hit signaling device
+
+Layout:
+
+[ 8x8 LEFT ]   [ RearM ]   [ 8x8 RIGHT ]
+
+[ 4x4 GND A ]             [ 4x4 GND B ]
+
+----------------------------------------
+
+4.1 Hit Lights (8x8)
+- Left = Green
+- Right = Red
+
+Behavior:
+- On-target = full brightness
+- Off-target = white
+- Instant ON
+- No animations
+
+----------------------------------------
+
+4.2 Rearm Indicator
+- ON = ready for next hit
+- OFF = during lockout or display hold
+
+----------------------------------------
+
+4.3 Ground Indicators (4x4)
+- Yellow color
+- Triggered by:
+  - Strip contact
+  - Guard short
+
+----------------------------------------
+
+4.4 Audio
+- Buzzer triggers on first hit
+- Fixed duration
+
+----------------------------------------
+
+NOT INCLUDED:
+- No timer
+- No score
+- No UI
+- No networking
+
+========================================
+5. PRO VERSION (HUB75 64x32)
+========================================
+
+Purpose:
+- Full scoring system with display
+
+Features:
+- Score display
+- Timer
+- Hit lights
+- Weapon mode
+- Future: cards, priority
+
+----------------------------------------
+
+Passivity System:
+- Runs automatically
+- Pauses with clock
+- Resets on valid action
+- Alerts referee
+
+----------------------------------------
+
+Networking:
+- Future strip view (WiFi)
+
+========================================
+6. REFEREE REMOTE
+========================================
+
+Features:
+- Start / Stop
+- Reset
+- Add time
+- Remove time
+- Mode switch
+- Pair button
+
+----------------------------------------
+
+Pairing:
+- ESP-NOW
+- Press-to-pair system
+- Any remote ↔ any machine
+
+========================================
+7. HIT DETECTION
+========================================
+
+Weapons:
+- Foil
+- Epee
+- Sabre
+
+----------------------------------------
+
+Timing:
+
+Foil:
+- Lockout = 300 ms
+- Depress = 14 ms
+
+Epee:
+- Lockout = 45 ms
+- Depress = 2 ms
+
+Sabre:
+- Lockout = 170 ms
+- Depress = ~1 ms
+
+----------------------------------------
+
+Behavior:
+- First hit → immediate light + buzzer
+- Second hit allowed during lockout
+- Lights persist after lockout
+
+========================================
+8. AUDIO SYSTEM
+========================================
+- Buzzer starts on first hit
+- Fixed duration
+- Non-blocking
+
+========================================
+9. MODE SYSTEM
+========================================
+- Foil / Epee / Sabre
+- Cycles via button
+- LED indicators
+
+========================================
+10. CODE BREAKDOWN (CURRENT IMPLEMENTATION)
+========================================
+
+Input:
+- Reads analog values:
+  - weapon pins
+  - lame pins
+  - ground pins
+
+----------------------------------------
+
+Detection:
+- foil()
+- epee()
+- sabre()
+
+Uses:
+- Threshold checks
+- Depress timing
+- State flags
+
+----------------------------------------
+
+Scoring:
+- registerHitA()
+- registerHitB()
+
+These:
+- Set hit flags
+- Start lockout timer
+- Trigger buzzer
+- Render display
+
+----------------------------------------
+
+Timing:
+- lockoutWindowOpen()
+- updateScoringCycle()
+
+Handles:
+- Lockout duration
+- Display hold
+- Reset
+
+----------------------------------------
+
+Display:
+- matricesRenderHits()
+
+Behavior:
+- Full matrix color fill
+- Center 2x2 used for ground/short
+
+========================================
+11. REQUIRED CHANGES FOR LITE VERSION
+========================================
+
+1. REMOVE ground from hit matrices
+- Currently uses center pixels
+- Must be moved to separate 4x4 displays
+
+----------------------------------------
+
+2. ADD ground indicator matrices
+
+Example:
+CRGB groundA[16];
+CRGB groundB[16];
+
+----------------------------------------
+
+3. ADD rearm indicator
+
+Logic:
+ready = !scoringActive AND !displayHoldActive
+
+----------------------------------------
+
+4. STOP calling FastLED.show() every loop
+
+Problem:
+- Blocks CPU
+- Can affect timing
+
+Fix:
+Use:
+bool displayDirty;
+
+Only update when needed
+
+----------------------------------------
+
+5. REMOVE blocking delays
+
+Problem:
+- delay() pauses detection
+
+Fix:
+- Use millis()/micros()
+
+----------------------------------------
+
+6. SPLIT rendering functions
+
+Instead of:
+matricesRenderHits();
+
+Use:
+renderHits();
+renderGround();
+renderRearm();
+
+----------------------------------------
+
+7. CLEAN serial output (optional)
+
+Remove:
+sendHitMessageA/B()
+
+----------------------------------------
+
+8. OPTIONAL FUTURE
+- Analog calibration
+- Noise filtering improvements
+
+========================================
+12. DEVELOPMENT ROADMAP
+========================================
+
+Phase 1:
+- Fix display system
+- Add ground + rearm indicators
+- Clean rendering
+
+Phase 2:
+- Tune detection thresholds
+- Improve stability
+
+Phase 3:
+- Build Pro version
+
+Phase 4:
+- Add remote system
+
+========================================
+END OF DOCUMENT
+========================================
