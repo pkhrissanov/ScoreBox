@@ -4484,6 +4484,16 @@
 	)
 	(wire
 		(pts
+			(xy 205.74 201.93) (xy 209.55 201.93)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "06d34621-9d03-4d36-a638-a0afb5c7b451")
+	)
+	(wire
+		(pts
 			(xy 373.38 116.84) (xy 375.92 116.84)
 		)
 		(stroke
@@ -6542,6 +6552,16 @@
 		)
 		(uuid "a729ce6b-a007-40c7-b845-629460c702fa")
 	)
+	(label "MatrixIO"
+		(at 209.55 201.93 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "af4f24b3-e7b5-4ac7-b979-f61d68d54e8b")
+	)
 	(label "RedMidIO"
 		(at 176.53 64.77 0)
 		(effects
@@ -6562,7 +6582,7 @@
 		)
 		(uuid "ddac687b-266c-4516-897a-9351c06d4b9f")
 	)
-	(label "GreenCloseIO"
+	(label "RedGNDIO"
 		(at 209.55 214.63 0)
 		(effects
 			(font
@@ -6572,7 +6592,7 @@
 		)
 		(uuid "e379127d-b4b9-43da-b8fb-d60bbe4fb6dc")
 	)
-	(label "RedGNDIO"
+	(label "GreenCloseIO"
 		(at 209.55 212.09 0)
 		(effects
 			(font
