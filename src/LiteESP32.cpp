@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <FastLED.h>
 
+
 // ================= BASIC =================
 #define DEBUG 1
 #define BAUDRATE 115200
@@ -19,9 +20,6 @@ CRGB leds[NUM_LEDS];
 
 // ================= BUZZER =================
 #define BUZZER_PIN 27
-#define BUZZER_CH 0
-#define BUZZER_FREQ 3000
-#define BUZZER_RES 8
 
 #define BUZZERTIME 1500
 #define LIGHTTIME 3500
@@ -32,8 +30,8 @@ CRGB leds[NUM_LEDS];
 #define BTN_MODE   16
 
 // ================= WEAPON INPUTS =================
-#define redClosePin   39   // VN
-#define redMidPin     36   // VP
+#define redClosePin   39
+#define redMidPin     36
 #define redGNDPin     34
 
 #define greenClosePin 35
@@ -47,12 +45,10 @@ CRGB leds[NUM_LEDS];
 
 volatile uint8_t currentMode = EPEE_MODE;
 
-//                         foil      epee     sabre
 const unsigned long lockout[] = {300000UL, 45000UL, 170000UL};
 const unsigned long depress[] = { 14000UL,  2000UL,   1000UL};
 
 // ================= THRESHOLDS =================
-// Temporary 12-bit ESP32 values. Tune later.
 #define MID_LOW          1600
 #define MID_HIGH         2400
 #define HIGH_HIT         3600
@@ -70,9 +66,6 @@ volatile int greenClose = 0;
 volatile int greenMid   = 0;
 volatile int greenGND   = 0;
 
-// Old scoring naming:
-// A = green
-// B = red
 #define weaponA greenClose
 #define lameA   greenMid
 #define groundA greenGND
@@ -108,17 +101,19 @@ volatile unsigned long displayStartMs = 0;
 volatile bool buzzerRequest = false;
 volatile bool displayDirty = true;
 
+bool messageActive = false;
+unsigned long messageUntilMs = 0;
+
 bool buzzerActive = false;
 unsigned long buzzerStartMs = 0;
 
 uint8_t volumeLevel = 2;
-unsigned long rearmTimeMs = LIGHTTIME;
+unsigned long rearmTimeMs = 3000;
 
 // ================= MATRIX HELPERS =================
 uint16_t XY(uint8_t x, uint8_t y) {
   if (x >= MATRIX_W || y >= MATRIX_H) return 0;
 
-  // Column serpentine layout: each 8-pixel column is wired up/down
   if (x % 2 == 0) {
     return x * MATRIX_H + y;
   } else {
@@ -134,10 +129,117 @@ void fillRect(uint8_t x0, uint8_t y0, uint8_t w, uint8_t h, CRGB color) {
   }
 }
 
+void showMessage(String msg, CRGB color, uint16_t holdMs) {
+  fill_solid(leds, NUM_LEDS, CRGB::Black);
+
+  msg.toUpperCase();
+
+  int x = 1;
+  int y = 1;
+
+  for (int i = 0; i < msg.length(); i++) {
+    char c = msg[i];
+
+    if (c == 'F') {
+      fillRect(x, y, 1, 6, color);
+      fillRect(x, y, 4, 1, color);
+      fillRect(x, y + 2, 3, 1, color);
+      x += 5;
+    }
+    else if (c == 'O') {
+      fillRect(x, y, 4, 1, color);
+      fillRect(x, y + 5, 4, 1, color);
+      fillRect(x, y, 1, 6, color);
+      fillRect(x + 3, y, 1, 6, color);
+      x += 5;
+    }
+    else if (c == 'I') {
+      fillRect(x, y, 3, 1, color);
+      fillRect(x + 1, y, 1, 6, color);
+      fillRect(x, y + 5, 3, 1, color);
+      x += 4;
+    }
+    else if (c == 'L') {
+      fillRect(x, y, 1, 6, color);
+      fillRect(x, y + 5, 4, 1, color);
+      x += 5;
+    }
+    else if (c == 'E') {
+      fillRect(x, y, 1, 6, color);
+      fillRect(x, y, 4, 1, color);
+      fillRect(x, y + 2, 3, 1, color);
+      fillRect(x, y + 5, 4, 1, color);
+      x += 5;
+    }
+    else if (c == 'P') {
+      fillRect(x, y, 1, 6, color);
+      fillRect(x, y, 4, 1, color);
+      fillRect(x, y + 2, 4, 1, color);
+      fillRect(x + 3, y, 1, 3, color);
+      x += 5;
+    }
+    else if (c == 'S') {
+      fillRect(x, y, 4, 1, color);
+      fillRect(x, y + 2, 4, 1, color);
+      fillRect(x, y + 5, 4, 1, color);
+      fillRect(x, y, 1, 3, color);
+      fillRect(x + 3, y + 2, 1, 4, color);
+      x += 5;
+    }
+    else if (c == 'A') {
+      fillRect(x, y, 4, 1, color);
+      fillRect(x, y + 2, 4, 1, color);
+      fillRect(x, y, 1, 6, color);
+      fillRect(x + 3, y, 1, 6, color);
+      x += 5;
+    }
+    else if (c == 'B') {
+      fillRect(x, y, 1, 6, color);
+      fillRect(x, y, 4, 1, color);
+      fillRect(x, y + 2, 4, 1, color);
+      fillRect(x, y + 5, 4, 1, color);
+      fillRect(x + 3, y, 1, 6, color);
+      x += 5;
+    }
+    else if (c == 'R') {
+      fillRect(x, y, 1, 6, color);
+      fillRect(x, y, 4, 1, color);
+      fillRect(x, y + 2, 4, 1, color);
+      fillRect(x + 3, y, 1, 3, color);
+      leds[XY(x + 2, y + 3)] = color;
+      leds[XY(x + 3, y + 4)] = color;
+      x += 5;
+    }
+    else if (c == '1' || c == '3' || c == '5') {
+      if (c == '1') {
+        fillRect(x + 1, y, 1, 6, color);
+      } else if (c == '3') {
+        fillRect(x, y, 4, 1, color);
+        fillRect(x, y + 2, 4, 1, color);
+        fillRect(x, y + 5, 4, 1, color);
+        fillRect(x + 3, y, 1, 6, color);
+      } else {
+        fillRect(x, y, 4, 1, color);
+        fillRect(x, y + 2, 4, 1, color);
+        fillRect(x, y + 5, 4, 1, color);
+        fillRect(x, y, 1, 3, color);
+        fillRect(x + 3, y + 2, 1, 4, color);
+      }
+      x += 5;
+    }
+    else {
+      x += 3;
+    }
+  }
+
+  FastLED.show();
+  messageActive = true;
+  messageUntilMs = millis() + holdMs;
+}
+
 void renderDisplay() {
   fill_solid(leds, NUM_LEDS, CRGB::Black);
 
-  // Red/B hit light: x 0-7
   if (hitOnTargB) {
     fillRect(0, 0, 8, 8, CRGB::Red);
   } else if (hitOffTargB) {
@@ -146,7 +248,6 @@ void renderDisplay() {
     fillRect(8, 0, 2, 8, CRGB::Yellow);
   }
 
-  // Green/A hit light: x 24-31
   if (hitOnTargA) {
     fillRect(24, 0, 8, 8, CRGB::Green);
   } else if (hitOffTargA) {
@@ -155,34 +256,19 @@ void renderDisplay() {
     fillRect(22, 0, 2, 8, CRGB::Yellow);
   }
 
-  // Mode indicator in center
-  if (currentMode == FOIL_MODE) {
-    fillRect(14, 3, 4, 2, CRGB::Blue);
-  } else if (currentMode == EPEE_MODE) {
-    fillRect(14, 2, 4, 4, CRGB::Purple);
-  } else {
-    fillRect(14, 1, 4, 6, CRGB::Orange);
-  }
-
   FastLED.show();
   displayDirty = false;
 }
 
 // ================= BUZZER =================
 void buzzerOn() {
-  uint8_t duty = 70 + volumeLevel * 35;
-  if (duty > 220) duty = 220;
-
-  ledcWriteTone(BUZZER_CH, BUZZER_FREQ);
-  ledcWrite(BUZZER_CH, duty);
-
+  digitalWrite(BUZZER_PIN, HIGH);
   buzzerStartMs = millis();
   buzzerActive = true;
 }
 
 void buzzerOff() {
-  ledcWrite(BUZZER_CH, 0);
-  ledcWriteTone(BUZZER_CH, 0);
+  digitalWrite(BUZZER_PIN, LOW);
   buzzerActive = false;
 }
 
@@ -444,6 +530,7 @@ void updateScoringCycle() {
 
 // ================= CORE 0 WEAPON TASK =================
 void weaponTask(void *parameter) {
+
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
 
@@ -460,28 +547,15 @@ void weaponTask(void *parameter) {
     stripGroundB = isMidFoilEpee(groundB);
 
     if (!scoringActive || lockoutWindowOpen()) {
-      if (currentMode == FOIL_MODE) {
-        foil();
-      } else if (currentMode == EPEE_MODE) {
-        epee();
-      } else {
-        sabre();
-      }
-    } else {
-      if (currentMode == FOIL_MODE) {
-        shortAFlag = foilShortA();
-        shortBFlag = foilShortB();
-        displayDirty = true;
-      } else if (currentMode == SABRE_MODE) {
-        shortAFlag = sabreShortA();
-        shortBFlag = sabreShortB();
-        displayDirty = true;
-      }
+      if (currentMode == FOIL_MODE) foil();
+      else if (currentMode == EPEE_MODE) epee();
+      else sabre();
     }
 
-    vTaskDelay(pdMS_TO_TICKS(2));
+    vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
+
 
 // ================= BUTTONS =================
 void handleButtons() {
@@ -503,7 +577,9 @@ void handleButtons() {
     lastVolumeMs = now;
 
     volumeLevel++;
-    if (volumeLevel > 4) volumeLevel = 0;
+    if (volumeLevel > 5) volumeLevel = 0;
+
+    showMessage("VOLUME:" + String(volumeLevel), CRGB::White, 3000);
 
     Serial.print("# Volume: ");
     Serial.println(volumeLevel);
@@ -512,8 +588,11 @@ void handleButtons() {
   if (lastRearm == HIGH && rearmNow == LOW && now - lastRearmMs > 200) {
     lastRearmMs = now;
 
-    rearmTimeMs += 1000;
-    if (rearmTimeMs > 5000) rearmTimeMs = 1000;
+    if (rearmTimeMs == 1000) rearmTimeMs = 3000;
+    else if (rearmTimeMs == 3000) rearmTimeMs = 5000;
+    else rearmTimeMs = 1000;
+
+    showMessage("REARM:" + String(rearmTimeMs / 1000), CRGB::White, 3000);
 
     Serial.print("# Rearm time: ");
     Serial.println(rearmTimeMs);
@@ -526,6 +605,14 @@ void handleButtons() {
     if (currentMode > SABRE_MODE) currentMode = FOIL_MODE;
 
     fullReset();
+
+    if (currentMode == FOIL_MODE) {
+      showMessage("FOIL", CRGB::Blue, 3000);
+    } else if (currentMode == EPEE_MODE) {
+      showMessage("EPEE", CRGB::Blue, 3000);
+    } else {
+      showMessage("SABER", CRGB::Blue, 3000);
+    }
 
     Serial.print("# Mode: ");
     if (currentMode == FOIL_MODE) Serial.println("Foil");
@@ -607,8 +694,8 @@ void setup() {
   pinMode(BTN_REARM, INPUT_PULLUP);
   pinMode(BTN_MODE, INPUT_PULLUP);
 
-  ledcSetup(BUZZER_CH, BUZZER_FREQ, BUZZER_RES);
-  ledcAttachPin(BUZZER_PIN, BUZZER_CH);
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
   buzzerOff();
 
   FastLED.addLeds<LED_TYPE, MATRIX_PIN, COLOR_ORDER>(leds, NUM_LEDS);
@@ -622,9 +709,9 @@ void setup() {
   xTaskCreatePinnedToCore(
     weaponTask,
     "WeaponTask",
-    4096,
+    8192,
     NULL,
-    1,
+    2,
     NULL,
     0
   );
@@ -638,7 +725,12 @@ void loop() {
   updateBuzzer();
   updateScoringCycle();
 
-  if (displayDirty) {
+  if (messageActive) {
+    if (millis() >= messageUntilMs) {
+      messageActive = false;
+      displayDirty = true;
+    }
+  } else if (displayDirty) {
     renderDisplay();
   }
 
