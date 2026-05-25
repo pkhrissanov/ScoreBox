@@ -4484,16 +4484,6 @@
 	)
 	(wire
 		(pts
-			(xy 205.74 201.93) (xy 209.55 201.93)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "06d34621-9d03-4d36-a638-a0afb5c7b451")
-	)
-	(wire
-		(pts
 			(xy 373.38 116.84) (xy 375.92 116.84)
 		)
 		(stroke
@@ -4551,6 +4541,16 @@
 			(type default)
 		)
 		(uuid "0e023c11-c28d-4ced-819a-0ac7ed86b8ab")
+	)
+	(wire
+		(pts
+			(xy 205.74 204.47) (xy 209.55 204.47)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "0f0e9b2c-62f1-44e6-94ca-c331baa41c32")
 	)
 	(wire
 		(pts
@@ -5394,6 +5394,16 @@
 	)
 	(wire
 		(pts
+			(xy 205.74 201.93) (xy 209.55 201.93)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "6e2faffb-1f66-43ba-9b02-09f356d605c3")
+	)
+	(wire
+		(pts
 			(xy 365.76 151.13) (xy 365.76 153.67)
 		)
 		(stroke
@@ -5474,6 +5484,16 @@
 	)
 	(wire
 		(pts
+			(xy 205.74 176.53) (xy 209.55 176.53)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "73725e66-722a-4278-9de4-22d016ade24f")
+	)
+	(wire
+		(pts
 			(xy 210.82 95.25) (xy 220.98 95.25)
 		)
 		(stroke
@@ -5541,6 +5561,16 @@
 			(type default)
 		)
 		(uuid "7be81a43-8897-47d1-8557-4b83775d9a60")
+	)
+	(wire
+		(pts
+			(xy 205.74 181.61) (xy 209.55 181.61)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "7cca6647-99ca-4eff-9144-10c25d340989")
 	)
 	(wire
 		(pts
@@ -5844,6 +5874,16 @@
 	)
 	(wire
 		(pts
+			(xy 205.74 184.15) (xy 209.55 184.15)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "a4119ed6-3a9a-4485-b927-68cbbea6dbe9")
+	)
+	(wire
+		(pts
 			(xy 384.81 106.68) (xy 391.16 106.68)
 		)
 		(stroke
@@ -6051,6 +6091,16 @@
 			(type default)
 		)
 		(uuid "c7f29afd-972f-4b9e-ad6c-9c45794486fe")
+	)
+	(wire
+		(pts
+			(xy 205.74 173.99) (xy 209.55 173.99)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "c9936ad7-c64b-456d-a089-78c67bcdb80a")
 	)
 	(wire
 		(pts
@@ -6432,6 +6482,16 @@
 		)
 		(uuid "0615afd0-8126-4fa6-8ad1-a2ed6f4f3838")
 	)
+	(label "PowerButton"
+		(at 337.82 187.96 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "0f09b122-4766-4b8a-b0fa-bf04353c5abb")
+	)
 	(label "RedCloseIO"
 		(at 167.64 163.83 180)
 		(effects
@@ -6441,6 +6501,16 @@
 			(justify right bottom)
 		)
 		(uuid "2a423dd1-09a5-4eb5-b2ab-7e2db9e9dba1")
+	)
+	(label "SpeakerIO"
+		(at 209.55 204.47 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "31d4419d-780a-4efb-bd53-e5309be80fe6")
 	)
 	(label "GreenGNDInput"
 		(at 210.82 95.25 0)
@@ -6472,6 +6542,16 @@
 		)
 		(uuid "3f14be5c-02d3-4346-95b0-29f2bc2a193c")
 	)
+	(label "ReArmButton"
+		(at 209.55 176.53 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "448e5705-8150-4e80-a3e6-325939acb746")
+	)
 	(label "RedMidInput"
 		(at 99.06 64.77 0)
 		(effects
@@ -6492,6 +6572,16 @@
 		)
 		(uuid "7300cb11-b834-4c67-9765-cbe6d987fb05")
 	)
+	(label "VolumeButton"
+		(at 337.82 198.12 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "786befef-fbfb-4347-92d7-591834a62753")
+	)
 	(label "MatrixIO"
 		(at 350.52 110.49 180)
 		(effects
@@ -6511,6 +6601,16 @@
 			(justify left bottom)
 		)
 		(uuid "7ebd59e2-1227-484d-9945-35e82c897099")
+	)
+	(label "PowerButton"
+		(at 209.55 184.15 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "8a6974c8-5a7c-4bd9-9cec-f059d74ec2d9")
 	)
 	(label "RedCloseIO"
 		(at 176.53 30.48 0)
@@ -6542,6 +6642,16 @@
 		)
 		(uuid "9a4978b5-a6a2-4bd6-ba44-b3ff5e1d1f45")
 	)
+	(label "VolumeButton"
+		(at 209.55 173.99 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "a5155fb0-3fe9-4d31-8a38-f6a0669bdc78")
+	)
 	(label "GreenCloseInput"
 		(at 210.82 30.48 0)
 		(effects
@@ -6560,7 +6670,17 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "af4f24b3-e7b5-4ac7-b979-f61d68d54e8b")
+		(uuid "b78509fe-a76f-49b9-b56c-e97a80dba491")
+	)
+	(label "ReArmButton"
+		(at 337.82 195.58 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "d2bbd6ad-fc3d-47d7-866c-5dd24cd1c261")
 	)
 	(label "RedMidIO"
 		(at 176.53 64.77 0)
@@ -6582,7 +6702,7 @@
 		)
 		(uuid "ddac687b-266c-4516-897a-9351c06d4b9f")
 	)
-	(label "RedGNDIO"
+	(label "GreenCloseIO"
 		(at 209.55 214.63 0)
 		(effects
 			(font
@@ -6592,7 +6712,7 @@
 		)
 		(uuid "e379127d-b4b9-43da-b8fb-d60bbe4fb6dc")
 	)
-	(label "GreenCloseIO"
+	(label "RedGNDIO"
 		(at 209.55 212.09 0)
 		(effects
 			(font
@@ -6601,6 +6721,26 @@
 			(justify left bottom)
 		)
 		(uuid "e45f4bb2-e6c9-4126-9692-90b7f9ba4c7e")
+	)
+	(label "ModeButton"
+		(at 337.82 190.5 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "e4c5afc0-6453-4f4a-8f55-8f9009d5c070")
+	)
+	(label "ModeButton"
+		(at 209.55 181.61 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "e6f28a2c-3ce5-4cbd-84c2-7683e5677add")
 	)
 	(label "SpeakerIO"
 		(at 378.46 31.75 0)
