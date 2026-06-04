@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <FastLED.h>
+#include <esp_task_wdt.h>
 
 // ============================================================
 // SCOREBOX LITE - ESP32-WROOM + FreeRTOS + WS2812B 8x32 MATRIX
@@ -503,6 +504,13 @@ void WeaponTask(void *pvParameters) {
   uint32_t loopCounter = 0;
   unsigned long lastDebugMs = 0;
 
+  // Register this task with the task watchdog.
+  // This lets the watchdog know WeaponTask is intentionally running fast.
+  esp_task_wdt_add(NULL);
+
+  // Prevent EVT_RESTORE from being spammed every loop.
+  bool lastGroundState = false;
+
   while (true) {
     int redClose = analogRead(redClosePin);
     int redMid   = analogRead(redMidPin);
@@ -526,10 +534,15 @@ void WeaponTask(void *pvParameters) {
     bool redOffCandidate = redOffTargetCandidate(redClose, redMid, redGND);
     bool greenOffCandidate = greenOffTargetCandidate(greenClose, greenMid, greenGND);
 
-    // Refresh grounding indicators while idle, but do not spam during a menu screen.
-    if (!scoringActive && (redGround || greenGround)) {
+    bool currentGroundState = redGround || greenGround;
+
+    if (!scoringActive &&
+        currentGroundState &&
+        currentGroundState != lastGroundState) {
       sendEvent(EVT_RESTORE);
     }
+
+    lastGroundState = currentGroundState;
 
     if (!scoringActive || lockoutOpen()) {
       if (!redHit && !redOffTarget) {
@@ -564,7 +577,6 @@ void WeaponTask(void *pvParameters) {
     updateScoringCycleFromWeaponTask();
 
 #if DEBUG
-    // Very light debug only. Do not spam Serial every loop.
     if (millis() - lastDebugMs >= 1000) {
       lastDebugMs = millis();
       Serial.print("R close/mid/gnd: ");
@@ -578,10 +590,13 @@ void WeaponTask(void *pvParameters) {
     }
 #endif
 
-    // Yield occasionally so the watchdog is happy, but do not add delay().
+    // Feed watchdog so it knows this task is alive.
+    esp_task_wdt_reset();
+
+    // Still let lower-priority system tasks breathe occasionally.
     loopCounter++;
     if ((loopCounter & 0xFF) == 0) {
-      taskYIELD();
+      vTaskDelay(1);
     }
   }
 }
