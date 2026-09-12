@@ -1,0 +1,10 @@
+want to have two machines, one that is hub75 based display, other is wsb2812b display
+
+what does each have
+
+hub75 display :
+scoring, lights, cards, period, time - similar to favero full arm 05
+
+wsb2812b display:
+lights, mode, volume. this would be a simpler one, but with the ability to also have TV view
+
